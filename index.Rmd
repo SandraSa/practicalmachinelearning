@@ -1,0 +1,160 @@
+---
+title: "Practical Machine Learning Project"
+author: "Sandra Sa"
+date: "November 18, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+
+## Background
+
+Using devices such as JawboneUp, NikeFuelBand, and Fitbitit is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+Aim of the project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+## Preparation
+
+#### Libraries
+
+For this implementation we need to make sure to load following libraries:
+
+``` {r warning=FALSE, message=FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+require(xgboost)
+```
+
+Upload train and test data
+```{r warning=FALSE, message=FALSE}
+
+train <- read.csv("pml-training.csv", row.names = 1)
+test <- read.csv("pml-testing.csv", row.names = 1)
+
+
+```
+
+### Data Preprocessing
+Many of the columns mark timestamps, username and etc. and will not contribute to the final model, therefore making sure we remove those columns by using regular expressions with grepl package.
+
+```{r warning=FALSE,  message=FALSE}
+colRemove <- grepl("^X|user_name|timestamp|window", names(train))
+trainClean <- train[, !colRemove]
+testClean <- test[, !colRemove]
+```
+Replace blank values with NA's
+
+```{r warning=FALSE, message=FALSE}
+trainClean[trainClean==""] <- NA
+testClean[testClean==""] <- NA
+```
+
+Check percent missing values in every column and mark the ones that has more than 60% of missing data
+
+```{r warning=FALSE}
+col_rmv <- NULL
+for (Var in names(trainClean)) {
+  perc_missing <- (sum(is.na(trainClean[,Var]))/19622) * 100
+  if (perc_missing > 60) {
+    print(c(Var,perc_missing))
+    col_rmv <- rbind(Var, col_rmv)
+  }
+}
+
+col_rmv <- as.vector(col_rmv)
+
+```
+
+Removing columns with missing values reduces dataset to 53 variables
+```{r warning=FALSE, eval=FALSE, message=FALSE}
+trainClean <- trainClean[ , !(names(trainClean) %in% col_rmv)]
+testClean <- testClean[ , !(names(testClean) %in% col_rmv)]
+```
+
+Finally removing remaining missing rows from the data
+```{r warning=FALSE,  message=FALSE}
+trainClean <- trainClean[complete.cases(trainClean),]
+testClean <- testClean[complete.cases(testClean),]
+```
+
+
+Will divide our cleaned train data into training and validation set with 70 - 30% distribution.
+
+```{r warning=FALSE,  message=FALSE}
+inTrain <- createDataPartition(trainClean$classe, p=0.70, list=F)
+trainData <- trainClean[inTrain, ]
+testData <- trainClean[-inTrain, ]
+```
+### Modeling with gradient boosting model
+
+Start preparting gradient boosting model designed and optimized for boosting trees algorithm.
+
+Creating a formula object to train data
+```{r warning=FALSE,  message=FALSE}
+predictors <- colnames(trainData)
+predictors <- predictors [! predictors %in% 'classe']
+
+formula_pred <- as.formula(paste('classe ~', paste(c(predictors), collapse = ' + ')))
+formula_pred
+
+```
+
+Set control  parameters  for the  model by:
+
+***
+* Number of folds set to 5
+* Repeats of 3 folds to be computed
+
+
+
+```{r warning=FALSE, eval=FALSE, message=FALSE}
+fitControl <- trainControl(method="repeatedcv",
+                           number=5,
+                           repeats=3,
+                           verboseIter=TRUE)
+```
+
+
+Fitting final model with option gbm for gradient boosting model and distribution set to multinomial for  factor objective
+
+```{r warning=FALSE, eval=FALSE, message=FALSE}
+fit_Final <- train(formula_pred,  
+                   data = trainData, 
+                   distribution = "multinomial",
+                   method = 'gbm', 
+                   trControl=fitControl,
+                   verbose=FALSE)
+```
+
+
+Check the fit of final model 
+
+```{r warning=FALSE, eval=FALSE, message=FALSE}
+summary(fit_Final)
+confusionMatrix(fit_Final)
+```
+
+Test on the validation set, where we are seeing our final model has accuracy of 96% and out og sample error of 3.6%
+
+
+```{r warning=FALSE, eval=FALSE, message=FALSE}
+fit_Pred <- predict(fit_Final, testData, na.action = na.pass)
+postResample(fit_Pred, testData$classe)
+confusionMatrix(fit_Pred, testData$classe)
+
+ooserror <- 1 - as.numeric(confusionMatrix(fit_Pred, testData$classe)$overall[1])
+ooserror
+```
+
+
+
+
+
+
